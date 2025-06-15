@@ -6,14 +6,13 @@
 
 namespace nn {
 
+    enum class ActivationType { Sigmoid, Tanh, ReLU, LeakyReLU };
+
     class Network {
     public:
-        explicit Network(const std::vector<int>& layers);
+        Network(std::vector<int> layers, ActivationType activation);
 
-        // Forward pass
         std::vector<double> forward(const std::vector<double>& input);
-
-        // Training (backpropagation + gradient descent)
         void train(const std::vector<double>& input, const std::vector<double>& target, double learning_rate);
 
         void save(const std::string& filepath) const;
@@ -21,15 +20,13 @@ namespace nn {
 
     private:
         std::vector<int> layer_sizes_;
-
-        std::vector<std::vector<double>> activations_;  // per layer
-        std::vector<std::vector<double>> biases_;       // biases[layer][neuron]
+        std::vector<std::vector<double>> biases_;               // biases[layer][neuron]
         std::vector<std::vector<std::vector<double>>> weights_; // weights[layer][from][to]
 
-        std::vector<double> sigmoid(const std::vector<double>& v) const;
-        std::vector<double> sigmoid_derivative(const std::vector<double>& v) const;
+        ActivationType activation_type_;
 
-        std::vector<double> dot(const std::vector<double>& vec, const std::vector<std::vector<double>>& mat, int col_count) const;
+        double (*activation_)(double x);
+        double (*activation_derivative_)(double x);
     };
 
 } // namespace nn

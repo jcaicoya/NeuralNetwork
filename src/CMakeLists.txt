@@ -1,5 +1,6 @@
 add_library(neural_net
         network.cpp
+        activation.hpp
 )
 
 # Include only what's needed: root include/ already added at top level

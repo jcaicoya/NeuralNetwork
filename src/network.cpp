@@ -3,127 +3,149 @@
 #include <cmath>
 #include <cassert>
 #include <fstream>
+#include "activation.hpp"
 
 namespace nn {
 
-static double sigmoid_scalar(double x) {
-    return 1.0 / (1.0 + std::exp(-x));
-}
+// ======= Constructor =======
+Network::Network(std::vector<int> layers, ActivationType activation)
+    : layer_sizes_(std::move(layers)), activation_type_(activation) {
 
-static double sigmoid_derivative_scalar(double x) {
-    double s = sigmoid_scalar(x);
-    return s * (1 - s);
-}
-
-Network::Network(const std::vector<int>& layers) : layer_sizes_(layers) {
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_real_distribution<> dist(-1.0, 1.0);
+    std::normal_distribution<> dist(0, 1);
 
-    // Initialize weights and biases
-    for (size_t i = 1; i < layers.size(); ++i) {
-        int prev = layers[i - 1];
-        int curr = layers[i];
+    for (size_t i = 1; i < layer_sizes_.size(); ++i) {
+        int curr = layer_sizes_[i];
+        int prev = layer_sizes_[i - 1];
 
-        // Biases
-        std::vector<double> b(curr);
-        for (double& val : b) val = dist(gen);
-        biases_.push_back(b);
-
-        // Weights
-        std::vector<std::vector<double>> w(prev, std::vector<double>(curr));
-        for (auto& row : w)
-            for (double& val : row) val = dist(gen);
-        weights_.push_back(w);
-    }
-}
-
-std::vector<double> Network::forward(const std::vector<double>& input) {
-    activations_.clear();
-    activations_.push_back(input);
-
-    std::vector<double> current = input;
-
-    for (size_t l = 0; l < weights_.size(); ++l) {
-        const auto& w = weights_[l];
-        const auto& b = biases_[l];
-        std::vector<double> next(b.size(), 0.0);
-
-        for (size_t j = 0; j < next.size(); ++j) {
-            for (size_t i = 0; i < current.size(); ++i) {
-                next[j] += current[i] * w[i][j];
-            }
-            next[j] += b[j];
-            next[j] = sigmoid_scalar(next[j]);
+        biases_.emplace_back(curr);
+        for (double& b : biases_.back()) {
+            b = dist(gen);
         }
 
-        activations_.push_back(next);
-        current = next;
+        weights_.emplace_back(prev, std::vector<double>(curr));
+        for (auto& from : weights_.back()) {
+            for (double& w : from) {
+                w = dist(gen);
+            }
+        }
     }
 
-    return current;
+    // Set function pointers
+    switch (activation_type_) {
+        case ActivationType::Sigmoid:
+            activation_ = Activation::sigmoid;
+            activation_derivative_ = Activation::sigmoid_derivative;
+            break;
+        case ActivationType::Tanh:
+            activation_ = Activation::tanh;
+            activation_derivative_ = Activation::tanh_derivative;
+            break;
+        case ActivationType::ReLU:
+            activation_ = Activation::relu;
+            activation_derivative_ = Activation::relu_derivative;
+            break;
+        case ActivationType::LeakyReLU:
+            activation_ = Activation::leakey_relu;
+            activation_derivative_ = Activation::leakey_relu_derivative;
+            break;
+        default:
+            throw std::runtime_error("Unknown activation type");
+    }
 }
 
-void Network::train(const std::vector<double>& input, const std::vector<double>& target, double learning_rate) {
-    assert(target.size() == layer_sizes_.back());
+// ======= Forward =======
+std::vector<double> Network::forward(const std::vector<double>& input) {
+    std::vector<double> layer_input = input;
 
-    std::vector<double> output = forward(input);
+    for (size_t l = 0; l < weights_.size(); ++l) {
+        std::vector<double> layer_output(layer_sizes_[l + 1]);
 
-    // Compute output error (delta)
-    std::vector<std::vector<double>> deltas(weights_.size());
-    std::vector<double> delta(layer_sizes_.back());
+        for (int j = 0; j < layer_sizes_[l + 1]; ++j) {
+            double z = biases_[l][j];
+            for (int i = 0; i < layer_sizes_[l]; ++i) {
+                z += weights_[l][i][j] * layer_input[i];
+            }
+            layer_output[j] = activation_(z);
+        }
 
-    for (size_t i = 0; i < delta.size(); ++i) {
-        double a = activations_.back()[i];
-        delta[i] = (a - target[i]) * a * (1 - a);  // sigmoid derivative
+        layer_input = std::move(layer_output);
     }
-    deltas.back() = delta;
 
-    // Backpropagate errors
-    for (int l = (int)weights_.size() - 2; l >= 0; --l) {
-        const auto& next_w = weights_[l + 1];
-        const auto& next_delta = deltas[l + 1];
-        std::vector<double> curr_delta(layer_sizes_[l + 1]);
+    return layer_input;
+}
 
+// ======= Train =======
+void Network::train(const std::vector<double>& input,
+                    const std::vector<double>& target,
+                    double learning_rate) {
+    // Forward pass: record activations and pre-activations
+    std::vector<std::vector<double>> activations = { input };
+    std::vector<std::vector<double>> zs;
+
+    for (size_t l = 0; l < weights_.size(); ++l) {
+        std::vector<double> z(layer_sizes_[l + 1]);
+        std::vector<double> a(layer_sizes_[l + 1]);
+
+        for (int j = 0; j < layer_sizes_[l + 1]; ++j) {
+            z[j] = biases_[l][j];
+            for (int i = 0; i < layer_sizes_[l]; ++i) {
+                z[j] += weights_[l][i][j] * activations[l][i];
+            }
+            a[j] = activation_(z[j]);
+        }
+
+        zs.push_back(std::move(z));
+        activations.push_back(std::move(a));
+    }
+
+    // Backward pass
+    std::vector<std::vector<double>> delta(weights_.size());
+
+    // Output layer delta
+    size_t last = weights_.size() - 1;
+    delta[last].resize(layer_sizes_.back());
+    for (int i = 0; i < layer_sizes_.back(); ++i) {
+        double z = zs[last][i];
+        double a = activations.back()[i];
+        delta[last][i] = (a - target[i]) * activation_derivative_(z);
+    }
+
+    // Hidden layers
+    for (int l = static_cast<int>(weights_.size()) - 2; l >= 0; --l) {
+        delta[l].resize(layer_sizes_[l + 1]);
         for (int i = 0; i < layer_sizes_[l + 1]; ++i) {
             double sum = 0.0;
             for (int j = 0; j < layer_sizes_[l + 2]; ++j) {
-                sum += next_w[i][j] * next_delta[j];
+                sum += weights_[l + 1][i][j] * delta[l + 1][j];
             }
-            double a = activations_[l + 1][i];
-            curr_delta[i] = sum * a * (1 - a);
+            double z = zs[l][i];
+            delta[l][i] = sum * activation_derivative_(z);
         }
-
-        deltas[l] = curr_delta;
     }
 
-    // Update weights and biases
+    // Gradient descent
     for (size_t l = 0; l < weights_.size(); ++l) {
-        auto& w = weights_[l];
-        auto& b = biases_[l];
-        const auto& delta = deltas[l];
-        const auto& a = activations_[l];
-
-        for (size_t i = 0; i < a.size(); ++i) {
-            for (size_t j = 0; j < delta.size(); ++j) {
-                w[i][j] -= learning_rate * a[i] * delta[j];
+        for (int i = 0; i < layer_sizes_[l]; ++i) {
+            for (int j = 0; j < layer_sizes_[l + 1]; ++j) {
+                weights_[l][i][j] -= learning_rate * delta[l][j] * activations[l][i];
             }
         }
-
-        for (size_t j = 0; j < delta.size(); ++j) {
-            b[j] -= learning_rate * delta[j];
+        for (int j = 0; j < layer_sizes_[l + 1]; ++j) {
+            biases_[l][j] -= learning_rate * delta[l][j];
         }
     }
 }
 
-    void nn::Network::save(const std::string& filepath) const {
+void nn::Network::save(const std::string& filepath) const {
     std::ofstream out(filepath, std::ios::binary);
     if (!out) {
         throw std::runtime_error("Failed to open file for saving: " + filepath);
     }
 
     // Save layer sizes
-    int size = static_cast<int>(layer_sizes_.size());
+    const int size = static_cast<int>(layer_sizes_.size());
     out.write(reinterpret_cast<const char*>(&size), sizeof(int));
     out.write(reinterpret_cast<const char*>(layer_sizes_.data()), sizeof(int) * size);
 
@@ -143,7 +165,7 @@ void Network::train(const std::vector<double>& input, const std::vector<double>&
 }
 
 
-    void nn::Network::load(const std::string& filepath) {
+void nn::Network::load(const std::string& filepath) {
     std::ifstream in(filepath, std::ios::binary);
     if (!in) {
         throw std::runtime_error("Failed to open file for loading: " + filepath);
