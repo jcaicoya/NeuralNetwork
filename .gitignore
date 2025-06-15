@@ -1,0 +1,40 @@
+# CLion IDE
+.idea/
+cmake-build-*/
+*.iml
+
+# CMake build artifacts
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+install_manifest.txt
+
+# Build outputs
+/build/
+/bin/
+/lib/
+/*.exe
+/*.out
+/*.app
+/*.dll
+/*.so
+/*.dylib
+/*.a
+/*.o
+/*.obj
+
+# Generated test logs
+Testing/
+test_detail.xml
+*.log
+
+# macOS files
+.DS_Store
+
+# Windows thumbnail cache
+Thumbs.db
+
+# Crash reports
+*.stackdump
