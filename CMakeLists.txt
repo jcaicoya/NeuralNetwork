@@ -12,6 +12,6 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # Add subdirectories
 add_subdirectory(src)
-add_subdirectory(app)
+add_subdirectory(xor_learner)
 enable_testing()
 add_subdirectory(tests)
